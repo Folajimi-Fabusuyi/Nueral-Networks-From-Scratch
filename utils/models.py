@@ -1,54 +1,7 @@
 import numpy as np
 import os
 
-class Loss:
-    def CategoricalCrossEntropy(actual: np.ndarray, predicted: np.ndarray) -> np.ndarray:
-        return -np.sum(actual * np.log(predicted + 1e-9))
-    
-    # Going to be for sigmoid
-    def BinaryCrossEntropy(actual: np.ndarray, predicted: np.ndarray, count: int) -> np.ndarray:
-        pass
-
-    def MeanSquaredError(actual: np.ndarray, predicted: np.ndarray, count: int) -> np.ndarray: 
-        return np.sum(np.power(actual - predicted, 2)) * (1/count)
-    
-class Activations:
-    # Output only activation
-    def SoftMax(x: np.ndarray) -> np.ndarray:
-        # Gives outputs as probabilities when paired with categorical cross entropy
-        shifted_x = x - np.max(x)
-        return np.exp(shifted_x) / np.sum(np.exp(shifted_x))
-    
-    # Either input or output activations
-    def RelU(x: np.ndarray, derivative=False) -> np.ndarray:
-        # Great for training for outputs without an upper bound but a strict lower bound at 0, usually not good for hidden layers
-        if derivative == False:
-            return np.maximum(0, x)
-        return np.where(x > 0, 1, 0)
-    
-    def LeakyRelU(x: np.ndarray, derivative=False) -> np.ndarray:
-        # Same as Relu but more leeway for lower bound and a viable hidden layers choice
-        if derivative == False:
-            return np.where(x > 0, x, 0.01 * x) 
-        return np.where(x > 0, 1, 0.01)
-    
-    def Sigmoid(x: np.ndarray, derivative=False) -> np.ndarray:      
-        # Great for predicting values between 0 and 1 when paired with binary cross entropy
-        if derivative == False:
-            return 1 / (1 + np.exp(-1 * x))
-        return x * (1 - x)
-    
-    def Tanh(x: np.ndarray, derivative=False) -> np.ndarray:
-        # Binds inputs/outputs to -1 and 1
-        if derivative == False:  
-            return np.tanh(x)
-        return 1 - np.power(x, 2)
-    
-    def Linear(x: np.ndarray, derivative=False) -> np.ndarray:
-        # Great for uncapped output values, negative or positive
-        if derivative == False:
-            return x
-        return 1
+from functions import Activations, Loss
 
 
 class Settings:
@@ -73,7 +26,7 @@ class Settings:
     def __init__(self, input: list[list[int]], output: list[list[int]], hidden="16, 8", 
                  mini_batch=0, lr=0.001, momentum=0.9, model_type="mp", 
                  activation="leaky_relu", output_activation="relu", normalize=False, norm: tuple[float, float]=(0.0, 0.0),
-                 dropout_rate=0.0):
+                 dropout_rate=0.0, train_split=1.0):
         model_dict = {"mp": MultilayerPerceptron}
         activation_dict = {"relu": Activations.RelU,
                            "sigmoid": Activations.Sigmoid,
@@ -82,24 +35,28 @@ class Settings:
                            "leaky_relu": Activations.LeakyRelU,
                            "linear": Activations.Linear}
         
+        # Train-Test Split
+        
+        
+        # Transpose back to correctly shaped array
+        self.input = np.array(input).T
+        self.output = np.array(output).T
+        
         self.normalize = normalize
         if norm[0] > 0 and norm[1] > 0: # Manual norm values, useful when input and output set has a guaranteed limit, aka, pixel color.
             self.normalize = True
             self.i_scaler = norm[0]
             self.o_scaler = norm[1]
-        elif self.normalize: # Automatic norm value, uses max input and output value
-            self.i_scaler = 1
-            self.o_scaler = 1
+        elif self.normalize: # Automatic norm value, uses max input and output values            
+            self.i_scaler = max((self.input * -1).max(), self.input.max())
+            self.o_scaler = max((self.output * -1).max(), self.output.max())
             
-            self.i_scaler = max(max(input))
-            self.o_scaler = max(max(output))
+            self.i_scaler = max(1e-2, float(self.i_scaler))
+            self.o_scaler = max(1e-2, float(self.o_scaler))
+                 
+            self.input /= self.i_scaler
+            self.output /= self.o_scaler
             
-            # TODO: Make this work for NxN dimensional arrays for both input and output
-            self.input = [[round(pair[0]/self.i_scaler, 7), round(pair[1]/self.i_scaler, 7)] for pair in input]
-            self.output = [[round(val/self.o_scaler, 7) for val in output[0]]]  
-        else:
-            self.input = input
-            self.output = output
         
         self.dropout_rate = max(0.0, min(dropout_rate, 0.99))
         self.hidden = [int(layer) for layer in hidden.split(",")]
@@ -149,10 +106,10 @@ class MultilayerPerceptron:
     def load(self, settings: Settings):
         '''Loads settings and initializes model'''
         
-        # Input is entered in transposed form for easier programatic input creation and then rotated back
-        self.input = np.array(settings.input).T 
+        # Input/Output are entered in transposed form for easier programatic input creation and then rotated back
+        self.input = settings.input
         self.test_input = np.array([])
-        self.true_output = np.array(settings.output)
+        self.true_output = settings.output
         
         # Node counts
         self.input_node_count = self.input.shape[0]
@@ -214,7 +171,7 @@ class MultilayerPerceptron:
             os.system('cls' if os.name == 'nt' else 'clear')
             print(f"Epoch {self.epoch} | Loss: {round(self.avg_loss, 10)}")
             print(f"Lr: {round(self.learning_rate, 10)} | Calc_Avg_L: {round(np.mean(self.loss), 10)}")
-            print(f"Loss_length: {len(self.loss)} | Actual_Batch: {self.actual_batch} | Equal: {len(self.loss) == self.actual_batch - 1}")
+            print(f"Current_Batch: {len(self.loss)} | Actual_Batch: {self.actual_batch} | Equal: {len(self.loss) == self.actual_batch - 1}")
         
     def predict(self, input: list[list[int]]) -> list[int]:
         '''Uses existing weights and biases to predict input'''
@@ -364,7 +321,7 @@ if __name__ == "__main__":
     import math
     
     pythagorean_in = []
-    pythagorean_out = [[]]
+    pythagorean_out = []
     
     samples_per_bracket = 250
     brackets = [(0, 5), (5, 20), (20, 50), (50, 100)]
@@ -378,20 +335,20 @@ if __name__ == "__main__":
             k = math.sqrt(math.pow(i, 2) + math.pow(j, 2))
             
             pythagorean_in.append([i, j])
-            pythagorean_out[0].append(k)
+            pythagorean_out.append([k])
             
     for _ in range(10):
         pythagorean_in.append([0.0, 0.0])
-        pythagorean_out[0].append(0.0)
+        pythagorean_out.append([0.0])
     
     indices = list(range(len(pythagorean_in)))
     random.shuffle(indices)
     
     pythagorean_in = [pythagorean_in[i] for i in indices]
-    pythagorean_out = [[pythagorean_out[0][i] for i in indices]]
+    pythagorean_out = [pythagorean_out[i] for i in indices]
     
     x_or_in = [[1, 1], [0, 1], [1, 0], [0, 0]]
-    x_or_out = [[0, 1, 1, 0]]
+    x_or_out = [[0], [1], [1], [0]]
     
     nn_settings = Settings(
         input= pythagorean_in, 
@@ -401,14 +358,14 @@ if __name__ == "__main__":
         mini_batch=64,
         hidden="32",              
         normalize=True,
-        dropout_rate=0.2,
+        # dropout_rate=0.2,
         lr=1e-3
     )
     
     # Training loop
     nn = NeuralNetwork(nn_settings)
     while nn.model.avg_loss > 1e-6 or nn.model.epoch == 1:
-        if nn.model.epoch % 1000 == 0 and len(nn.model.loss) == 0:
+        if nn.model.epoch % 100 == 0 and len(nn.model.loss) == 0:
             leave = input("Quit[y/n]: ")
             if leave == "y":
                 break
@@ -430,6 +387,8 @@ if __name__ == "__main__":
     # DONE: Add Learning rate adapting
         # NOTE: Could definitely improve on this
     # DONE: Add Dropout during forward pass
+    # DONE: Standardize input and output structure for passing into model
+    
     
     # TODO: Implement validation loss each epoch with train-test split
     # TODO: Implement train_until conditional for model 
