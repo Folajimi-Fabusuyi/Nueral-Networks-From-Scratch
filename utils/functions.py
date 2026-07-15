@@ -1,14 +1,14 @@
 import numpy as np
 
 class Loss:
-    def CategoricalCrossEntropy(actual: np.ndarray, predicted: np.ndarray) -> np.ndarray:
+    def CategoricalCrossEntropy(actual: np.ndarray, predicted: np.ndarray) -> int | float:
         return -np.sum(actual * np.log(predicted + 1e-9))
     
     # Going to be for sigmoid
-    def BinaryCrossEntropy(actual: np.ndarray, predicted: np.ndarray, count: int) -> np.ndarray:
+    def BinaryCrossEntropy(actual: np.ndarray, predicted: np.ndarray, count: int) -> int | float:
         pass
 
-    def MeanSquaredError(actual: np.ndarray, predicted: np.ndarray, count: int) -> np.ndarray: 
+    def MeanSquaredError(actual: np.ndarray, predicted: np.ndarray, count: int) -> int | float: 
         return np.sum(np.power(actual - predicted, 2)) * (1/count)
     
 class Activations:

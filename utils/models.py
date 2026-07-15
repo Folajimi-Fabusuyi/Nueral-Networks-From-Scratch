@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import time
 
 from functions import Activations, Loss
 
@@ -26,7 +27,7 @@ class Settings:
     def __init__(self, input: list[list[int]], output: list[list[int]], hidden="16, 8", 
                  mini_batch=0, lr=0.001, momentum=0.9, model_type="mp", 
                  activation="leaky_relu", output_activation="relu", normalize=False, norm: tuple[float, float]=(0.0, 0.0),
-                 dropout_rate=0.0, train_split=1.0):
+                 dropout_rate=0.0, train_split=0.8):
         model_dict = {"mp": MultilayerPerceptron}
         activation_dict = {"relu": Activations.RelU,
                            "sigmoid": Activations.Sigmoid,
@@ -35,28 +36,34 @@ class Settings:
                            "leaky_relu": Activations.LeakyRelU,
                            "linear": Activations.Linear}
         
-        # Train-Test Split
-        
-        
-        # Transpose back to correctly shaped array
-        self.input = np.array(input).T
-        self.output = np.array(output).T
-        
+        # Transpose back to correctly shaped array        
+        input = np.array(input)
+        output = np.array(output)
+                
         self.normalize = normalize
         if norm[0] > 0 and norm[1] > 0: # Manual norm values, useful when input and output set has a guaranteed limit, aka, pixel color.
             self.normalize = True
             self.i_scaler = norm[0]
             self.o_scaler = norm[1]
         elif self.normalize: # Automatic norm value, uses max input and output values            
-            self.i_scaler = max((self.input * -1).max(), self.input.max())
-            self.o_scaler = max((self.output * -1).max(), self.output.max())
+            self.i_scaler = max((input * -1).max(), input.max())
+            self.o_scaler = max((output * -1).max(), output.max())
             
             self.i_scaler = max(1e-2, float(self.i_scaler))
             self.o_scaler = max(1e-2, float(self.o_scaler))
                  
-            self.input /= self.i_scaler
-            self.output /= self.o_scaler
-            
+            input /= self.i_scaler
+            output /= self.o_scaler
+              
+        # Train-Test Split
+        train_data_end_index = int(input.shape[0] * train_split)
+        
+        self.input = np.array(input[:train_data_end_index]).T
+        self.output = np.array(output[:train_data_end_index]).T
+        
+        self.validation_input = np.array(input[train_data_end_index:]).T
+        self.validation_output = np.array(output[train_data_end_index:]).T
+        
         
         self.dropout_rate = max(0.0, min(dropout_rate, 0.99))
         self.hidden = [int(layer) for layer in hidden.split(",")]
@@ -82,9 +89,12 @@ class NeuralNetwork:
         self.settings = settings
         self.model = settings.model_type(settings)
         
-    def train_model(self, debug=False):
-        '''Trains model for one epoch'''
-        self.model.train(debug)
+    def train_model(self, epoch=1, debug=False):
+        '''Trains model for number of epochs'''
+        target_epoch = self.model.epoch + epoch
+        
+        while self.model.epoch != target_epoch:
+            self.model.train(debug)
         
     def predict(self, input: list[list[int]]) -> list[int]: # Change to return a list of integers
         '''Uses existing weights and biases to predict input'''
@@ -108,8 +118,12 @@ class MultilayerPerceptron:
         
         # Input/Output are entered in transposed form for easier programatic input creation and then rotated back
         self.input = settings.input
-        self.test_input = np.array([])
         self.true_output = settings.output
+        
+        self.validation_input = settings.validation_input
+        self.validation_output = settings.validation_output
+        
+        self.predict_input = np.array([])
         
         # Node counts
         self.input_node_count = self.input.shape[0]
@@ -118,8 +132,8 @@ class MultilayerPerceptron:
         self.output_node_count = self.true_output.shape[0]
         
         # Epoch variables
-        self.epoch = 1
-        self.epoch_ended = False
+        self.epoch = 0
+        self.epoch_ended = False #Currently unused, considering removing
         
         # Batch variables
         if settings.mini_batch == 0: self.mini_batch = self.input.shape[1]
@@ -151,8 +165,9 @@ class MultilayerPerceptron:
         
         self.error: list[np.ndarray] = []
         self.gradient: list[np.ndarray] = []
-        self.loss: list[int] = []
-        self.avg_loss = 0
+        self.batch_losses: list[int] = []
+        self.train_loss = 0
+        self.validation_loss = 0
         
         # Input and output normalization scalars, for stabilizing network for larger numbers
         if settings.normalize:
@@ -167,16 +182,18 @@ class MultilayerPerceptron:
         out = self.forwardPass().flatten().tolist()
         self.backPropagate()
         self.updatePass()
+        
         if debug:
             os.system('cls' if os.name == 'nt' else 'clear')
-            print(f"Epoch {self.epoch} | Loss: {round(self.avg_loss, 10)}")
-            print(f"Lr: {round(self.learning_rate, 10)} | Calc_Avg_L: {round(np.mean(self.loss), 10)}")
-            print(f"Current_Batch: {len(self.loss)} | Actual_Batch: {self.actual_batch} | Equal: {len(self.loss) == self.actual_batch - 1}")
+            print(f"Epoch {self.epoch}")
+            print(f"Training_Loss: {round(self.train_loss, 10)} | Validation_Loss: {round(self.validation_loss, 10)}")
+            print(f"Lr: {round(self.learning_rate, 10)} | Mid_Epoch_Loss: {round(np.mean(self.batch_losses), 10)}")
+            print(f"Current_Batch: {len(self.batch_losses)} | Actual_Batch: {self.actual_batch}")
         
     def predict(self, input: list[list[int]]) -> list[int]:
         '''Uses existing weights and biases to predict input'''
 
-        self.test_input = np.array(input).T / self.i_scaler # Normalizes input to match size of training input
+        self.predict_input = np.array(input).T / self.i_scaler # Normalizes input to match size of training input
         out = self.forwardPass(predicting=True)
         out = (out * self.o_scaler).flatten().tolist()
         
@@ -204,7 +221,7 @@ class MultilayerPerceptron:
     def forwardPass(self, predicting=False) -> None | np.ndarray:
         '''Aggregates hidden and output layers'''
         
-        if predicting: input = self.test_input
+        if predicting: input = self.predict_input
         else:
             input = self.input.T[self.batch_index - self.mini_batch: self.batch_index].T
 
@@ -240,9 +257,9 @@ class MultilayerPerceptron:
         # This calculation here is really only for us to view how the model is doing
         # Might possibly be useful for more advanced learing rate adjustments
         if self.output_activation is Activations.SoftMax:
-            self.loss.append(Loss.CategoricalCrossEntropy(true_output, self.output))
+            self.batch_losses.append(Loss.CategoricalCrossEntropy(true_output, self.output))
         else:
-            self.loss.append(Loss.MeanSquaredError(true_output, self.output, self.actual_batch))
+            self.batch_losses.append(Loss.MeanSquaredError(true_output, self.output, self.actual_batch))
         
         # The derivative of the loss
         if self.output_activation in [Activations.SoftMax, Activations.Linear]:
@@ -275,14 +292,6 @@ class MultilayerPerceptron:
         if self.batch_index < self.input.shape[1]:
             self.batch_index += self.mini_batch
             self.epoch_ended = False
-        else:
-            # This means that an epoch has ended
-            self.epoch += 1
-            self.epoch_ended = True
-            self.batch_index = self.mini_batch
-            self.avg_loss = np.mean(self.loss)
-            self.loss = []
-            
         
     def updatePass(self):
         '''Updates weights and biases by gradient'''
@@ -296,16 +305,50 @@ class MultilayerPerceptron:
         self.velocity = [(self.friction * self.velocity[i]) - (self.learning_rate * self.gradient[i]) for i in range(len(self.weights))]
         
         # Scheduled Learning Decay
-        if self.epoch % 100 == 0 and len(self.loss) == 0:
-            self.learning_rate *= 0.9
+        # if self.epoch % 100 == 0 and len(self.batch_losses) == 0:
+        #     self.learning_rate *= 0.9
 
         # Weight and bias nudges
         for index in range(len(self.weights)):
             # self.weights[index] -= self.gradient[index] * self.learning_rate
             self.weights[index] += self.velocity[index]
             self.biases[index] -= np.sum(self.error[index], axis=1, keepdims=True) * self.learning_rate
-
+        
+        
+        # This means that an epoch has ended
+        if self.batch_index >= self.input.shape[1]:  self.epoch_ends()
         self.reset()
+        
+    def validate(self):
+        '''Tests model on untrained data'''
+        
+        batch_losses = []
+        for index in range(0, self.validation_input.shape[1], self.mini_batch):
+            self.predict_input = self.validation_input.T[index: index + self.mini_batch].T
+            actual_output = self.validation_output.T[index: index + self.mini_batch].T
+            predicted_output = self.forwardPass(predicting=True)
+            
+            if self.output_activation is Activations.SoftMax: batch_loss = Loss.CategoricalCrossEntropy(actual_output, predicted_output)
+            else: batch_loss = Loss.MeanSquaredError(actual_output, predicted_output, self.predict_input.shape[1])
+            
+            batch_losses.append(batch_loss)
+        
+        self.validation_loss = np.mean(batch_losses)
+        self.reset()
+        
+    def epoch_ends(self):
+        # Increment epoch count, reset batch index
+        self.epoch += 1
+        self.epoch_ended = True
+        self.batch_index = self.mini_batch
+        
+        # Recalculate average loss and reset loss log for current epoch
+        self.train_loss = np.mean(self.batch_losses)
+        self.batch_losses = []
+        
+        # Valdidate epoch with untrained data
+        self.validate()
+            
     
     def reset(self):
         self.hidden_layers = []
@@ -313,7 +356,7 @@ class MultilayerPerceptron:
         self.error = []
         self.gradient = []
         self.dropout_masks = []
-        self.test_input = None
+        self.predict_input = None
         
         
 if __name__ == "__main__":
@@ -358,18 +401,17 @@ if __name__ == "__main__":
         mini_batch=64,
         hidden="32",              
         normalize=True,
-        # dropout_rate=0.2,
+        dropout_rate=0.25,
+        train_split=0.5,
         lr=1e-3
     )
     
     # Training loop
     nn = NeuralNetwork(nn_settings)
-    while nn.model.avg_loss > 1e-6 or nn.model.epoch == 1:
-        if nn.model.epoch % 100 == 0 and len(nn.model.loss) == 0:
-            leave = input("Quit[y/n]: ")
-            if leave == "y":
-                break
-        nn.train_model(debug=True)
+    go_to_testing = ""
+    while go_to_testing != "y":
+        nn.train_model(epoch=2000, debug=True)
+        go_to_testing = input("Quit[y/n]: ")
 
 
     user_input = ""
@@ -380,18 +422,15 @@ if __name__ == "__main__":
         data = [[float(number) for number in user_input.split(",")]]
         prediction = nn.predict(data)[0]
         print(round(prediction, 2))
-        print(f"Avg: {nn.model.true_output.mean()}")
 
     
     # DONE: Add functionality for scaled input during prediction
-    # DONE: Add Learning rate adapting
-        # NOTE: Could definitely improve on this
     # DONE: Add Dropout during forward pass
     # DONE: Standardize input and output structure for passing into model
+    # DONE: Implement validation loss each epoch with train-test split
+    # DONE: Implement train_until conditional for model 
     
-    
-    # TODO: Implement validation loss each epoch with train-test split
-    # TODO: Implement train_until conditional for model 
+    # TODO: Add Learning rate adapting in relation to validation_loss plateuing
     # TODO: Implement model saving
     # TODO: Implement dynamic model setting changes
     
