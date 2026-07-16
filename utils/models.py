@@ -1,6 +1,5 @@
 import numpy as np
 import os
-import time
 
 from functions import Activations, Loss
 
@@ -165,9 +164,14 @@ class MultilayerPerceptron:
         
         self.error: list[np.ndarray] = []
         self.gradient: list[np.ndarray] = []
+        
         self.batch_losses: list[int] = []
         self.train_loss = 0
         self.validation_loss = 0
+        
+        self.plateau = 0
+        self.long_plateau = 0
+        self.best_validation_loss = 1
         
         # Input and output normalization scalars, for stabilizing network for larger numbers
         if settings.normalize:
@@ -186,9 +190,14 @@ class MultilayerPerceptron:
         if debug:
             os.system('cls' if os.name == 'nt' else 'clear')
             print(f"Epoch {self.epoch}")
-            print(f"Training_Loss: {round(self.train_loss, 10)} | Validation_Loss: {round(self.validation_loss, 10)}")
-            print(f"Lr: {round(self.learning_rate, 10)} | Mid_Epoch_Loss: {round(np.mean(self.batch_losses), 10)}")
-            print(f"Current_Batch: {len(self.batch_losses)} | Actual_Batch: {self.actual_batch}")
+            print(f"Training_Loss: {round(self.train_loss, 10)}") 
+            print(f"Validation_Loss: {round(self.validation_loss, 10)}")
+            print(f"Best Val_Loss: {round(self.best_validation_loss, 10)}")
+            print()
+            print(f"Lr: {round(self.learning_rate, 10)}")
+            print(f"Plateu: {self.plateau}")
+            print(f"Long_Plateu: {self.long_plateau}")
+            print(f"Batch: {len(self.batch_losses)}/{self.actual_batch}")
         
     def predict(self, input: list[list[int]]) -> list[int]:
         '''Uses existing weights and biases to predict input'''
@@ -303,10 +312,6 @@ class MultilayerPerceptron:
         if self.velocity == []:
             self.velocity = [np.zeros(self.weights[i].shape) for i in range(len(self.weights))]
         self.velocity = [(self.friction * self.velocity[i]) - (self.learning_rate * self.gradient[i]) for i in range(len(self.weights))]
-        
-        # Scheduled Learning Decay
-        # if self.epoch % 100 == 0 and len(self.batch_losses) == 0:
-        #     self.learning_rate *= 0.9
 
         # Weight and bias nudges
         for index in range(len(self.weights)):
@@ -348,6 +353,29 @@ class MultilayerPerceptron:
         
         # Valdidate epoch with untrained data
         self.validate()
+        
+        # Loss Scheduler - Reduce learning_rate on plateu
+        if self.dropout_rate:
+            if self.validation_loss >= self.best_validation_loss:
+                self.plateau += 1
+            else:
+                self.best_validation_loss = self.validation_loss
+                self.plateau = 0
+                self.long_plateau = 0
+                
+            if self.plateau >= 50:
+                reduced_learning_rate = (self.learning_rate * 0.5)
+                self.learning_rate = max(reduced_learning_rate, 1e-6)
+                self.plateau = 0
+                
+                if self.learning_rate <= 1e-6:
+                    self.long_plateau += 1
+            
+            # Revive learning_rate if plateau has gone on for too long
+            if self.long_plateau >= 5:
+                if self.validation_loss > 3e5: self.learning_rate *= 1000
+                else: self.learning_rate *= 100
+                self.long_plateau = 0
             
     
     def reset(self):
@@ -401,8 +429,8 @@ if __name__ == "__main__":
         mini_batch=64,
         hidden="32",              
         normalize=True,
-        dropout_rate=0.25,
-        train_split=0.5,
+        # dropout_rate=0.35,
+        train_split=0.8,
         lr=1e-3
     )
     
@@ -410,7 +438,7 @@ if __name__ == "__main__":
     nn = NeuralNetwork(nn_settings)
     go_to_testing = ""
     while go_to_testing != "y":
-        nn.train_model(epoch=2000, debug=True)
+        nn.train_model(epoch=10000, debug=True)
         go_to_testing = input("Quit[y/n]: ")
 
 
@@ -429,10 +457,10 @@ if __name__ == "__main__":
     # DONE: Standardize input and output structure for passing into model
     # DONE: Implement validation loss each epoch with train-test split
     # DONE: Implement train_until conditional for model 
+    # DONE: Add Learning rate adapting in relation to validation_loss plateuing
     
-    # TODO: Add Learning rate adapting in relation to validation_loss plateuing
+    
     # TODO: Implement model saving
     # TODO: Implement dynamic model setting changes
-    
     # TODO: Implement logging for networks and potential graphs
     # TODO: Make PySide6 with embedded graph and dashboard
