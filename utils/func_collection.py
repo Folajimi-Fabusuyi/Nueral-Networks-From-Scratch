@@ -1,6 +1,9 @@
 import numpy as np
 
+
 class Loss:
+    '''Collection of Loss Functions'''
+
     def CategoricalCrossEntropy(actual: np.ndarray, predicted: np.ndarray) -> int | float:
         return -np.sum(actual * np.log(predicted + 1e-9))
     
@@ -10,8 +13,11 @@ class Loss:
 
     def MeanSquaredError(actual: np.ndarray, predicted: np.ndarray, count: int) -> int | float: 
         return np.sum(np.power(actual - predicted, 2)) * (1/count)
+
     
 class Activations:
+    '''Collection of Activation Functions'''
+    
     # Output only activation
     def SoftMax(x: np.ndarray) -> np.ndarray:
         # Gives outputs as probabilities when paired with categorical cross entropy

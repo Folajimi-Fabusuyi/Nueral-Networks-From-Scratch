@@ -1,7 +1,7 @@
 import numpy as np
 import os
 
-from functions import Activations, Loss
+from utils.func_collection import Activations, Loss
 
 
 class Settings:
@@ -22,17 +22,18 @@ class Settings:
         norm (tuple[float, float]): Sets the value inputs and ouputs are scaled down by, to this value.\n
         dropout_rate (float): Percentage of random hidden layer nodes that are turned off during training forward passes. Defaults to 0.0.\n
     '''
-    
+
+
     def __init__(self, input: list[list[int]], output: list[list[int]], hidden="16, 8", 
                  mini_batch=0, lr=0.001, momentum=0.9, model_type="mp", 
                  activation="leaky_relu", output_activation="relu", normalize=False, norm: tuple[float, float]=(0.0, 0.0),
                  dropout_rate=0.0, train_split=0.8):
         model_dict = {"mp": MultilayerPerceptron}
-        activation_dict = {"relu": Activations.RelU,
+        activation_dict = {"leaky_relu": Activations.LeakyRelU,
+                           "relu": Activations.RelU,
                            "sigmoid": Activations.Sigmoid,
                            "softmax": Activations.SoftMax,
                            "tanh": Activations.Tanh,
-                           "leaky_relu": Activations.LeakyRelU,
                            "linear": Activations.Linear}
         
         # Transpose back to correctly shaped array        
@@ -55,6 +56,7 @@ class Settings:
             output /= self.o_scaler
               
         # Train-Test Split
+        self.train_split = train_split
         train_data_end_index = int(input.shape[0] * train_split)
         
         self.input = np.array(input[:train_data_end_index]).T
@@ -69,36 +71,11 @@ class Settings:
         self.mini_batch = mini_batch
         
         self.lr = lr
-        self.friction = momentum
+        self.momentum = momentum
         self.activation = activation_dict[activation]
         self.output_activation = activation_dict[output_activation]
         self.model_type = model_dict[model_type]
             
-        
-               
-class NeuralNetwork:
-    '''
-    Creates a neural network based off of created settings\n
-    
-    Parameters:\n
-        settings (Settings): The settings of the nueral network\n
-    '''
-    
-    def __init__(self, settings: Settings):        
-        self.settings = settings
-        self.model = settings.model_type(settings)
-        
-    def train_model(self, epoch=1, debug=False):
-        '''Trains model for number of epochs'''
-        target_epoch = self.model.epoch + epoch
-        
-        while self.model.epoch != target_epoch:
-            self.model.train(debug)
-        
-    def predict(self, input: list[list[int]]) -> list[int]: # Change to return a list of integers
-        '''Uses existing weights and biases to predict input'''
-        return self.model.predict(input)
-
 
 class MultilayerPerceptron:
     '''
@@ -109,13 +86,13 @@ class MultilayerPerceptron:
     '''
     
     
-    def __init__(self, settings: Settings):
-        self.load(settings)
+    def __init__(self, settings: Settings, from_file=False):
+        self.load(settings, from_file)
 
-    def load(self, settings: Settings):
+    def load(self, settings: Settings, from_file=False):
         '''Loads settings and initializes model'''
         
-        # Input/Output are entered in transposed form for easier programatic input creation and then rotated back
+        # Input/Output are entered in transposed form for easier programatic input creation and then transposed back
         self.input = settings.input
         self.true_output = settings.output
         
@@ -160,7 +137,7 @@ class MultilayerPerceptron:
         self.biases: list[np.ndarray] = []
         
         self.velocity: list[np.ndarray] = []
-        self.friction = settings.friction
+        self.momentum = settings.momentum
         
         self.error: list[np.ndarray] = []
         self.gradient: list[np.ndarray] = []
@@ -177,8 +154,9 @@ class MultilayerPerceptron:
         if settings.normalize:
             self.i_scaler = settings.i_scaler
             self.o_scaler = settings.o_scaler
-        
-        self.initializeNetwork()
+
+        if not from_file:
+            self.initializeNetwork()
         
     def train(self, debug=False):
         '''Trains model for one epoch'''
@@ -188,16 +166,18 @@ class MultilayerPerceptron:
         self.updatePass()
         
         if debug:
-            os.system('cls' if os.name == 'nt' else 'clear')
+            # os.system('cls' if os.name == 'nt' else 'clear')
+            print("\033[H\033[J", end="")
             print(f"Epoch {self.epoch}")
             print(f"Training_Loss: {round(self.train_loss, 10)}") 
             print(f"Validation_Loss: {round(self.validation_loss, 10)}")
-            print(f"Best Val_Loss: {round(self.best_validation_loss, 10)}")
-            print()
-            print(f"Lr: {round(self.learning_rate, 10)}")
-            print(f"Plateu: {self.plateau}")
-            print(f"Long_Plateu: {self.long_plateau}")
-            print(f"Batch: {len(self.batch_losses)}/{self.actual_batch}")
+            print(f"Batch: {len(self.batch_losses) + 1}/{self.input.shape[1]//self.mini_batch}")
+            if self.dropout_rate:
+                print(f"Best Val_Loss: {round(self.best_validation_loss, 10)}")
+                print()
+                print(f"Lr: {round(self.learning_rate, 10)}")
+                print(f"Plateu: {self.plateau}")
+                print(f"Long_Plateu: {self.long_plateau}")
         
     def predict(self, input: list[list[int]]) -> list[int]:
         '''Uses existing weights and biases to predict input'''
@@ -231,8 +211,7 @@ class MultilayerPerceptron:
         '''Aggregates hidden and output layers'''
         
         if predicting: input = self.predict_input
-        else:
-            input = self.input.T[self.batch_index - self.mini_batch: self.batch_index].T
+        else: input = self.input.T[self.batch_index - self.mini_batch: self.batch_index].T
 
         self.actual_batch = input.shape[1]
 
@@ -255,7 +234,7 @@ class MultilayerPerceptron:
         # Output layer propagation
         raw_output = self.weights[-1] @ self.hidden_layers[-1] + self.biases[-1]
         self.output = self.output_activation(raw_output)
-        
+
         return self.output
         
     def backPropagate(self):
@@ -311,7 +290,7 @@ class MultilayerPerceptron:
         # Momentum implementation
         if self.velocity == []:
             self.velocity = [np.zeros(self.weights[i].shape) for i in range(len(self.weights))]
-        self.velocity = [(self.friction * self.velocity[i]) - (self.learning_rate * self.gradient[i]) for i in range(len(self.weights))]
+        self.velocity = [(self.momentum * self.velocity[i]) - (self.learning_rate * self.gradient[i]) for i in range(len(self.weights))]
 
         # Weight and bias nudges
         for index in range(len(self.weights)):
@@ -321,7 +300,7 @@ class MultilayerPerceptron:
         
         
         # This means that an epoch has ended
-        if self.batch_index >= self.input.shape[1]:  self.epoch_ends()
+        if self.batch_index >= self.input.shape[1]:  self.epochEnds()
         self.reset()
         
     def validate(self):
@@ -331,17 +310,19 @@ class MultilayerPerceptron:
         for index in range(0, self.validation_input.shape[1], self.mini_batch):
             self.predict_input = self.validation_input.T[index: index + self.mini_batch].T
             actual_output = self.validation_output.T[index: index + self.mini_batch].T
+
             predicted_output = self.forwardPass(predicting=True)
-            
+
             if self.output_activation is Activations.SoftMax: batch_loss = Loss.CategoricalCrossEntropy(actual_output, predicted_output)
             else: batch_loss = Loss.MeanSquaredError(actual_output, predicted_output, self.predict_input.shape[1])
             
             batch_losses.append(batch_loss)
+            self.reset()
         
         self.validation_loss = np.mean(batch_losses)
         self.reset()
         
-    def epoch_ends(self):
+    def epochEnds(self):
         # Increment epoch count, reset batch index
         self.epoch += 1
         self.epoch_ended = True
@@ -352,6 +333,7 @@ class MultilayerPerceptron:
         self.batch_losses = []
         
         # Valdidate epoch with untrained data
+        self.reset()
         self.validate()
         
         # Loss Scheduler - Reduce learning_rate on plateu
@@ -387,80 +369,3 @@ class MultilayerPerceptron:
         self.predict_input = None
         
         
-if __name__ == "__main__":
-    import random
-    import math
-    
-    pythagorean_in = []
-    pythagorean_out = []
-    
-    samples_per_bracket = 250
-    brackets = [(0, 5), (5, 20), (20, 50), (50, 100)]
-    
-    for lower_bound, upper_bound in brackets:
-        for _ in range(samples_per_bracket):
-            # Generate floats instead of ints for smoother curves!
-            i = random.uniform(lower_bound, upper_bound)
-            j = random.uniform(lower_bound, upper_bound)
-            
-            k = math.sqrt(math.pow(i, 2) + math.pow(j, 2))
-            
-            pythagorean_in.append([i, j])
-            pythagorean_out.append([k])
-            
-    for _ in range(10):
-        pythagorean_in.append([0.0, 0.0])
-        pythagorean_out.append([0.0])
-    
-    indices = list(range(len(pythagorean_in)))
-    random.shuffle(indices)
-    
-    pythagorean_in = [pythagorean_in[i] for i in indices]
-    pythagorean_out = [pythagorean_out[i] for i in indices]
-    
-    x_or_in = [[1, 1], [0, 1], [1, 0], [0, 0]]
-    x_or_out = [[0], [1], [1], [0]]
-    
-    nn_settings = Settings(
-        input= pythagorean_in, 
-        output= pythagorean_out,
-        activation="leaky_relu",
-        output_activation="linear", 
-        mini_batch=64,
-        hidden="32",              
-        normalize=True,
-        # dropout_rate=0.35,
-        train_split=0.8,
-        lr=1e-3
-    )
-    
-    # Training loop
-    nn = NeuralNetwork(nn_settings)
-    go_to_testing = ""
-    while go_to_testing != "y":
-        nn.train_model(epoch=10000, debug=True)
-        go_to_testing = input("Quit[y/n]: ")
-
-
-    user_input = ""
-    while user_input.lower() not in ["q", "quit"]:
-        user_input = input("Enter input for model prediction, separated by commas ['q' to quit]: ")
-        if user_input in ["q", "quit"]:
-            break
-        data = [[float(number) for number in user_input.split(",")]]
-        prediction = nn.predict(data)[0]
-        print(round(prediction, 2))
-
-    
-    # DONE: Add functionality for scaled input during prediction
-    # DONE: Add Dropout during forward pass
-    # DONE: Standardize input and output structure for passing into model
-    # DONE: Implement validation loss each epoch with train-test split
-    # DONE: Implement train_until conditional for model 
-    # DONE: Add Learning rate adapting in relation to validation_loss plateuing
-    
-    
-    # TODO: Implement model saving
-    # TODO: Implement dynamic model setting changes
-    # TODO: Implement logging for networks and potential graphs
-    # TODO: Make PySide6 with embedded graph and dashboard
