@@ -48,3 +48,34 @@ def pythagoreanGen(data_count=1000):
         pythagorean_out = [pythagorean_out[i] for i in indices]
 
     return (pythagorean_in, pythagorean_out)
+
+def sineGen(data_count=1000):
+    with Progress() as progress:
+        task = progress.add_task("[red]Generating...", total=data_count)
+        
+        sine_in = []
+        sine_out = []
+        
+        samples_per_bracket = data_count // 4
+        brackets = [(0, 90), (90, 180), (180, 270), (270, 360)]
+        
+        for lower_bound, upper_bound in brackets:
+            for _ in range(samples_per_bracket):
+                # Generate floats instead of ints for smoother curves!
+                i = random.uniform(lower_bound, upper_bound)
+                
+                k = math.sin(i * math.pi / 180)
+                
+                sine_in.append([i])
+                sine_out.append([k])
+                progress.advance(task, 1)
+                
+        
+        indices = list(range(len(sine_in)))
+        random.shuffle(indices)
+        
+        sine_in = [sine_in[i] for i in indices]
+        sine_out = [sine_out[i] for i in indices]
+
+    return (sine_in, sine_out)
+    

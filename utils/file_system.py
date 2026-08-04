@@ -5,7 +5,7 @@ import rich.progress
 
 from utils.models import MultilayerPerceptron
 from utils.func_collection import Activations
-
+from utils.models import Settings
 
 MODEL_MAP = {
     MultilayerPerceptron: 0
@@ -36,8 +36,8 @@ REVERSE_ACTIVATION_MAP = {
 HEADER_FMT = "<5sh"
 HEADER_BYTES = 7
 
-SETTINGS_FMT = "<4e6H"
-SETTINGS_BYTES = 20
+SETTINGS_FMT = "<4e2H2e4H"
+SETTINGS_BYTES = 24
 
 HIDDEN_LAYER_FMT = "<H"
 HIDDEN_LAYER_BYTES = 2
@@ -77,12 +77,14 @@ def readMnet(path: str) -> dict:
                         "train_split": settings_tuple[3],
                         "mini_batch": settings_tuple[4],
                         "normalize": settings_tuple[5],
-                        "model_type": REVERSE_MODEL_MAP[settings_tuple[6]],
-                        "activation": REVERSE_ACTIVATION_MAP[settings_tuple[7]],
-                        "output_activation": REVERSE_ACTIVATION_MAP[settings_tuple[8]]}
+                        "i_scaler": settings_tuple[6],
+                        "o_scaler": settings_tuple[7],
+                        "model_type": REVERSE_MODEL_MAP[settings_tuple[8]],
+                        "activation": REVERSE_ACTIVATION_MAP[settings_tuple[9]],
+                        "output_activation": REVERSE_ACTIVATION_MAP[settings_tuple[10]]}
 
             # Hidden Settings extraction
-            layer_count = settings_tuple[9]
+            layer_count = settings_tuple[11]
             hidden_layer_list = []
             for _ in range(layer_count):
                 layer = struct.unpack(HIDDEN_LAYER_FMT, f.read(HIDDEN_LAYER_BYTES))[0]
@@ -152,7 +154,7 @@ def saveMnet(path: str, network):
     '''
     Saves network dictionary to mnet file.
     Settings are inserted in the binary in this order
-        (filetype, version, lr, momentum, dropout, train_split, mini_batch, normalize, 
+        (filetype, version, lr, momentum, dropout, train_split, mini_batch, normalize, i_scaler, o_scaler, 
          model_type, activation, out_activation, hidden_layers_count, hidden_layer_nodes,
          hash, weights, biases)
     '''
@@ -205,13 +207,15 @@ def getHeaderBinary() -> bytes:
     header_binary = struct.pack(HEADER_FMT, b"MyNet", VERSION)
     return header_binary
 
-def getSettingsBinary(settings) -> bytes:
+def getSettingsBinary(settings: Settings) -> bytes:
     learning_rate = settings.lr
     momentum = settings.momentum
     dropout = settings.dropout_rate
     train_split = settings.train_split
     mini_batch = settings.mini_batch
     normalize = settings.normalize
+    i_scaler = settings.i_scaler
+    o_scaler = settings.o_scaler
 
     model_type = MODEL_MAP[settings.model_type]
     activation = ACTIVATION_MAP[settings.activation]
@@ -226,8 +230,8 @@ def getSettingsBinary(settings) -> bytes:
     settings_binary = struct.pack(
         SETTINGS_FMT, learning_rate, momentum,
         dropout, train_split, mini_batch,
-        normalize, model_type, activation, out_activation,
-        hidden_layers_count
+        normalize, i_scaler, o_scaler, model_type, activation, out_activation,
+        hidden_layers_count,
     )
 
     for layer in hidden_layer_nodes:

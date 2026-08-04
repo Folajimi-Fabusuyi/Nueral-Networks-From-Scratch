@@ -39,7 +39,7 @@ class Settings:
         # Transpose back to correctly shaped array        
         input = np.array(input)
         output = np.array(output)
-                
+        
         self.normalize = normalize
         if norm[0] > 0 and norm[1] > 0: # Manual norm values, useful when input and output set has a guaranteed limit, aka, pixel color.
             self.normalize = True
@@ -51,19 +51,29 @@ class Settings:
             
             self.i_scaler = max(1e-2, float(self.i_scaler))
             self.o_scaler = max(1e-2, float(self.o_scaler))
-                 
+                
             input /= self.i_scaler
             output /= self.o_scaler
-              
-        # Train-Test Split
-        self.train_split = train_split
-        train_data_end_index = int(input.shape[0] * train_split)
+        else:
+            self.i_scaler = 1
+            self.o_scaler = 1
+
+        if input.shape: # Checks for loading model with the purpose of prediction only
+            # Train-Test Split
+            self.train_split = train_split
+            train_data_end_index = int(input.shape[0] * train_split)
+            
+            self.input = np.array(input[:train_data_end_index]).T
+            self.output = np.array(output[:train_data_end_index]).T
         
-        self.input = np.array(input[:train_data_end_index]).T
-        self.output = np.array(output[:train_data_end_index]).T
-        
-        self.validation_input = np.array(input[train_data_end_index:]).T
-        self.validation_output = np.array(output[train_data_end_index:]).T
+            self.validation_input = np.array(input[train_data_end_index:]).T
+            self.validation_output = np.array(output[train_data_end_index:]).T
+        else:
+            self.input = np.array(None)
+            self.output = np.array(None)
+            self.validation_input = np.array([])
+            self.validation_output = np.array([])
+            self.train_split = train_split
         
         
         self.dropout_rate = max(0.0, min(dropout_rate, 0.99))
@@ -102,17 +112,18 @@ class MultilayerPerceptron:
         self.predict_input = np.array([])
         
         # Node counts
-        self.input_node_count = self.input.shape[0]
+        self.input_node_count = self.input.shape[0] if self.input.shape else 0
         self.hidden_node_count_per_layer = settings.hidden
         self.hidden_layers_count = len(self.hidden_node_count_per_layer)
-        self.output_node_count = self.true_output.shape[0]
+        self.output_node_count = self.true_output.shape[0] if self.true_output.shape else 0
         
         # Epoch variables
         self.epoch = 0
         self.epoch_ended = False #Currently unused, considering removing
         
         # Batch variables
-        if settings.mini_batch == 0: self.mini_batch = self.input.shape[1]
+        if settings.mini_batch == 0 and settings.input.shape: 
+            self.mini_batch = self.input.shape[1]
         else: self.mini_batch = settings.mini_batch
         self.batch_index = self.mini_batch
         self.actual_batch = 0
@@ -151,9 +162,8 @@ class MultilayerPerceptron:
         self.best_validation_loss = 1
         
         # Input and output normalization scalars, for stabilizing network for larger numbers
-        if settings.normalize:
-            self.i_scaler = settings.i_scaler
-            self.o_scaler = settings.o_scaler
+        self.i_scaler = settings.i_scaler
+        self.o_scaler = settings.o_scaler
 
         if not from_file:
             self.initializeNetwork()

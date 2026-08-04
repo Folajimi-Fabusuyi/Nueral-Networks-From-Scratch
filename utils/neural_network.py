@@ -1,5 +1,3 @@
-from typing import override
-
 from utils.models import Settings
 from utils.file_system import readMnet, saveMnet
 
@@ -16,30 +14,38 @@ class NeuralNetwork:
         out (list[list[int]]): Output
     '''
 
-    def __init__(self, settings: Settings):        
-        self.settings = settings
-        self.model = settings.model_type(settings)
+    def __init__(self, settings: Settings=None, path:str=None, inp: list[list[int]]=None, out: list[list[int]]=None):        
+        if not path:
+            self.settings = settings
+            self.model = settings.model_type(settings)
+        else:
+            data = readMnet(path)
+            self.settings = Settings(
+                inp, out,
+                hidden=data["settings"]["hidden"],
+                mini_batch=data["settings"]["mini_batch"],
+                lr=data["settings"]["learning_rate"],
+                momentum=data["settings"]["momentum"],
+                model_type=data["settings"]["model_type"],
+                activation=data["settings"]["activation"],
+                output_activation=data["settings"]["output_activation"],
+                normalize=data["settings"]["normalize"],
+                dropout_rate=data["settings"]["dropout_rate"],
+                train_split=data["settings"]["train_split"],
+                norm=(data["settings"]["i_scaler"], data["settings"]["o_scaler"])
+            )
+    
+            self.model = self.settings.model_type(self.settings, True)
+            self.model.weights = data["weights"]
+            self.model.biases = data["biases"]
 
-    @override
-    def __init__(self, path: str, inp: list[list[int]], out: list[list[int]]):
-        data = readMnet(path)
-        self.settings = Settings(
-            inp, out,
-            hidden=data["settings"]["hidden"],
-            mini_batch=data["settings"]["mini_batch"],
-            lr=data["settings"]["learning_rate"],
-            momentum=data["settings"]["momentum"],
-            model_type=data["settings"]["model_type"],
-            activation=data["settings"]["activation"],
-            output_activation=data["settings"]["output_activation"],
-            normalize=data["settings"]["normalize"],
-            dropout_rate=data["settings"]["dropout_rate"],
-            train_split=data["settings"]["train_split"]
-        )
+    @classmethod
+    def create(self, settings: Settings):
+        return self(settings)
 
-        self.model = self.settings.model_type(self.settings, True)
-        self.model.weights = data["weights"]
-        self.model.biases = data["biases"]
+    @classmethod
+    def readFromFile(self, path: str, inp: list[list[int]]=None, out: list[list[int]]=None):
+        return self(path=path, inp=inp, out=out)
         
     def train_model(self, epoch=1, debug=False):
         '''Trains model for number of epochs'''
