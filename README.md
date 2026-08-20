@@ -2,9 +2,14 @@
 
 Logging my attempts at making neural networks from the ground up.
 
-### Goals
+
+### COMPLETED
 ---
-- Make number identification possible
-- Make an application that allows makes creating the neural networks less tedious
-- Move on to Neuroevolution or Convolutional Neural Networks
-- Randomly testing things as well
+- [x] Create package for creating neural networks
+
+
+### TODO
+---
+- [ ] Make demos using created models
+- [ ] Create Neuroevolutionary networks
+- [ ] Create Convolutional Neural Networks
