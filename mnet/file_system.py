@@ -1,37 +1,18 @@
+"""
+Mnet model reader and saver
+"""
+
 import struct
 import numpy as np
 import hashlib
 import rich.progress 
+from typing import TYPE_CHECKING
 
-from utils.models import MultilayerPerceptron
-from utils.func_collection import Activations
-from utils.models import Settings
+from .registry import *
 
-MODEL_MAP = {
-    MultilayerPerceptron: 0
-}
+if TYPE_CHECKING:
+    from .core import Settings
 
-REVERSE_MODEL_MAP = {
-    0: "mp"
-}
-
-ACTIVATION_MAP = {
-    Activations.LeakyRelU: 0,
-    Activations.RelU: 1,
-    Activations.Sigmoid: 2,
-    Activations.SoftMax: 3,
-    Activations.Tanh: 4,
-    Activations.Linear: 5
-}
-
-REVERSE_ACTIVATION_MAP = {
-    0: "leaky_relu",
-    1: "relu",
-    2: "sigmoid",
-    3: "softmax",
-    4: "tanh",
-    5: "linear"
-}
 
 HEADER_FMT = "<5sh"
 HEADER_BYTES = 7
@@ -76,7 +57,7 @@ def readMnet(path: str) -> dict:
                         "dropout_rate": settings_tuple[2],
                         "train_split": settings_tuple[3],
                         "mini_batch": settings_tuple[4],
-                        "normalize": settings_tuple[5],
+                        "auto_normalize": bool(settings_tuple[5]),
                         "i_scaler": settings_tuple[6],
                         "o_scaler": settings_tuple[7],
                         "model_type": REVERSE_MODEL_MAP[settings_tuple[8]],
@@ -154,7 +135,7 @@ def saveMnet(path: str, network):
     '''
     Saves network dictionary to mnet file.
     Settings are inserted in the binary in this order
-        (filetype, version, lr, momentum, dropout, train_split, mini_batch, normalize, i_scaler, o_scaler, 
+        (filetype, version, lr, momentum, dropout, train_split, mini_batch, auto_normalize, i_scaler, o_scaler, 
          model_type, activation, out_activation, hidden_layers_count, hidden_layer_nodes,
          hash, weights, biases)
     '''
@@ -162,7 +143,7 @@ def saveMnet(path: str, network):
     with rich.progress.Progress() as progress:
         task = progress.add_task("[red]Converting to Binary...", total=6)
 
-        settings = network.settings
+        settings = network.model.config
         model = network.model
 
         progress.update(task, description="[red]Converting Metadata")
@@ -213,7 +194,7 @@ def getSettingsBinary(settings: Settings) -> bytes:
     dropout = settings.dropout_rate
     train_split = settings.train_split
     mini_batch = settings.mini_batch
-    normalize = settings.normalize
+    auto_normalize = settings.auto_normalize
     i_scaler = settings.i_scaler
     o_scaler = settings.o_scaler
 
@@ -230,7 +211,7 @@ def getSettingsBinary(settings: Settings) -> bytes:
     settings_binary = struct.pack(
         SETTINGS_FMT, learning_rate, momentum,
         dropout, train_split, mini_batch,
-        normalize, i_scaler, o_scaler, model_type, activation, out_activation,
+        auto_normalize, i_scaler, o_scaler, model_type, activation, out_activation,
         hidden_layers_count,
     )
 
@@ -240,20 +221,22 @@ def getSettingsBinary(settings: Settings) -> bytes:
     return settings_binary
 
 def getWeightsBinary(model) -> bytes:
-    weight_count = len(model.weights)
-    matrix_sizes = []
-    for weight in model.weights:
-        matrix_sizes.append(weight.shape)
+    with rich.progress.Progress() as progress:
+        weight_count = len(model.weights)
+        matrix_sizes = []
+        for weight in model.weights:
+            matrix_sizes.append(weight.shape)
 
-    weights_binary = struct.pack(WEIGHT_BIAS_HEADER_FMT, weight_count)
-    for size in matrix_sizes:
-        weights_binary += struct.pack(WEIGHT_SHAPE_FMT, size[0], size[1])
+        weights_binary = struct.pack(WEIGHT_BIAS_HEADER_FMT, weight_count)
+        for size in matrix_sizes:
+            weights_binary += struct.pack(WEIGHT_SHAPE_FMT, size[0], size[1])
 
-    for weight_array in model.weights:
-        for node_weights in weight_array: 
-            for weight in node_weights:
-                weights_binary += struct.pack(WEIGHT_BIAS_FMT, weight)
-
+        task = progress.add_task("[red]Progress", total=weight_count)
+        for weight_array in model.weights:
+            for node_weights in weight_array: 
+                for weight in node_weights:
+                    weights_binary += struct.pack(WEIGHT_BIAS_FMT, weight)
+            progress.advance(task)
 
     return weights_binary
 
@@ -270,3 +253,8 @@ def getBiasesBinary(model) -> bytes:
             biases_binary += struct.pack(WEIGHT_BIAS_FMT, bias[0])
 
     return biases_binary
+
+__all__ = [
+    "readMnet",
+    "saveMnet"
+]
